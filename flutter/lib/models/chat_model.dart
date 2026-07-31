@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:dash_chat_2/dash_chat_2.dart';
 import 'package:desktop_multi_window/desktop_multi_window.dart';
 import 'package:draggable_float_widget/draggable_float_widget.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/shared_state.dart';
@@ -509,6 +511,59 @@ class ChatModel with ChangeNotifier {
     hideChatWindowOverlay();
     notifyListeners();
   }
+
+  String serializeChat(MessageKey key) {
+    final body = _messages[key];
+    if (body == null || body.chatMessages.isEmpty) return '';
+    final msgs = body.chatMessages.reversed.toList(growable: false);
+    final peerId = key.peerId;
+    final session = key.connId == ChatModel.clientModeID
+        ? 'client'
+        : key.connId.toString();
+    final date = _fmtDate(msgs.first.createdAt);
+    final header =
+        'RustDesk Chat Log\nPeer: $peerId\nSession: $session\nDate: $date\nLines: ${msgs.length}\n\n';
+    final sb = StringBuffer(header);
+    for (final m in msgs) {
+      final ts = _fmtDateTime(m.createdAt);
+      final sender = m.user.id == me.id ? 'Me' : 'Peer ($peerId)';
+      sb.writeln('[$ts] $sender: ${m.text}');
+    }
+    return sb.toString();
+  }
+
+  Future<void> offerSaveAs({
+    required String peerId,
+    required int connId,
+    required String content,
+  }) async {
+    final connLabel =
+        connId == ChatModel.clientModeID ? 'client' : connId.toString();
+    final fname =
+        '${peerId}_${connLabel}_${_fmtFileTs(DateTime.now())}.txt';
+    try {
+      final outputFile = await FilePicker.platform.saveFile(
+        dialogTitle: '${translate('Save as')}...',
+        fileName: fname,
+        allowedExtensions: ['txt'],
+        type: FileType.custom,
+      );
+      if (outputFile == null) return;
+      await File(outputFile).writeAsString(content);
+    } catch (e) {
+      debugPrint('offerSaveAs failed: $e');
+    }
+  }
+
+  static String _pad2(int n) => n.toString().padLeft(2, '0');
+  static String _pad4(int n) => n.toString().padLeft(4, '0');
+  static String _fmtDate(DateTime dt) =>
+      '${_pad4(dt.year)}-${_pad2(dt.month)}-${_pad2(dt.day)}';
+  static String _fmtDateTime(DateTime dt) =>
+      '${_fmtDate(dt)} ${_pad2(dt.hour)}:${_pad2(dt.minute)}:${_pad2(dt.second)}';
+  static String _fmtFileTs(DateTime dt) =>
+      '${_pad4(dt.year)}${_pad2(dt.month)}${_pad2(dt.day)}_'
+      '${_pad2(dt.hour)}${_pad2(dt.minute)}${_pad2(dt.second)}';
 
   resetClientMode() {
     _messages[clientModeID]?.clear();

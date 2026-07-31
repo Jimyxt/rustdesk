@@ -3996,6 +3996,21 @@ class FFI {
   /// Close the remote session.
   Future<void> close({bool closeSession = true}) async {
     closed = true;
+    try {
+      final clientKey = MessageKey(id, ChatModel.clientModeID);
+      final content = chatModel.serializeChat(clientKey);
+      if (content.isNotEmpty) {
+        final backupPath = await bind.saveChatBackup(
+            peerId: id, connId: ChatModel.clientModeID, content: content);
+        if (backupPath.isEmpty) {
+          debugPrint('AppData chat backup failed (peer $id)');
+        }
+        await chatModel.offerSaveAs(
+            peerId: id, connId: ChatModel.clientModeID, content: content);
+      }
+    } catch (e) {
+      debugPrint('chat backup failed: $e');
+    }
     chatModel.close();
     // Close all terminal models
     for (final model in _terminalModels.values) {

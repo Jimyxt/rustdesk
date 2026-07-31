@@ -2445,6 +2445,7 @@ impl<T: InvokeUiSession> Remote<T> {
             decode_fps,
             self.chroma.clone(),
             discard_queue,
+            Some(self.audio_sender.clone()),
             move |display: usize,
                   data: &mut scrap::ImageRgb,
                   _texture: *mut c_void,

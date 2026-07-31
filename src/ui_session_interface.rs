@@ -475,6 +475,9 @@ impl<T: InvokeUiSession> Session<T> {
     }
 
     pub fn save_custom_image_quality(&self, custom_image_quality: i32) {
+        if crate::ui_interface::is_option_fixed(hbb_common::config::keys::OPTION_IMAGE_QUALITY) {
+            return;
+        }
         let msg = self
             .lc
             .write()
@@ -484,6 +487,9 @@ impl<T: InvokeUiSession> Session<T> {
     }
 
     pub fn save_image_quality(&self, value: String) {
+        if crate::ui_interface::is_option_fixed(hbb_common::config::keys::OPTION_IMAGE_QUALITY) {
+            return;
+        }
         let msg = self.lc.write().unwrap().save_image_quality(value.clone());
         if let Some(msg) = msg {
             self.send(Data::Message(msg));

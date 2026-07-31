@@ -1381,6 +1381,15 @@ class RustdeskImpl {
     throw UnimplementedError("cmCloseConnection");
   }
 
+  Future<String> saveChatBackup({
+    required String peerId,
+    required int connId,
+    required String content,
+    dynamic hint,
+  }) {
+    throw UnimplementedError("saveChatBackup");
+  }
+
   Future<void> cmRemoveDisconnectedConnection(
       {required int connId, dynamic hint}) {
     throw UnimplementedError("cmRemoveDisconnectedConnection");
@@ -2051,6 +2060,18 @@ class RustdeskImpl {
   Future<String> mainDeployDevice(
       {required String token, required String id, dynamic hint}) {
     throw UnimplementedError("mainDeployDevice");
+  }
+
+  bool mainStartRecording({dynamic hint}) {
+    throw UnimplementedError("mainStartRecording");
+  }
+
+  bool mainStopRecording({dynamic hint}) {
+    throw UnimplementedError("mainStopRecording");
+  }
+
+  bool mainIsStandaloneRecording({dynamic hint}) {
+    return false;
   }
 
   void dispose() {}

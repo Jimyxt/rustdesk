@@ -666,6 +666,34 @@ pub fn session_send_chat(session_id: SessionID, text: String) {
     }
 }
 
+// chat_backup
+pub fn save_chat_backup(peer_id: String, conn_id: i32, content: String) -> SyncReturn<String> {
+    SyncReturn(save_chat_backup_inner(peer_id, conn_id, content))
+}
+
+fn save_chat_backup_inner(peer_id: String, conn_id: i32, content: String) -> String {
+    let dir = config::Config::path("chat_backup");
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        log::error!("[chat_backup] failed to create dir {:?}: {}", dir, e);
+        return String::new();
+    }
+    let ts = chrono::Local::now().format("%Y%m%d_%H%M%S").to_string();
+    let conn_label = if conn_id == -1 {
+        "client".to_owned()
+    } else {
+        conn_id.to_string()
+    };
+    let filename = format!("{}_{}_{}.txt", peer_id, conn_label, ts);
+    let path = dir.join(&filename);
+    match std::fs::write(&path, &content) {
+        Ok(_) => path.to_string_lossy().to_string(),
+        Err(e) => {
+            log::error!("[chat_backup] failed to write {:?}: {}", path, e);
+            String::new()
+        }
+    }
+}
+
 // Terminal functions
 pub fn session_open_terminal(session_id: SessionID, terminal_id: i32, rows: u32, cols: u32) {
     if let Some(session) = sessions::get_session_by_session_id(&session_id) {
@@ -3167,4 +3195,19 @@ pub mod server_side {
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
     }
+}
+
+// Fork feature: standalone screen recording (without remote connection).
+
+pub fn main_start_recording() -> SyncReturn<bool> {
+    SyncReturn(crate::standalone_recorder::start_standalone_recording())
+}
+
+pub fn main_stop_recording() -> SyncReturn<bool> {
+    crate::standalone_recorder::stop_standalone_recording();
+    SyncReturn(true)
+}
+
+pub fn main_is_standalone_recording() -> SyncReturn<bool> {
+    SyncReturn(crate::standalone_recorder::is_standalone_recording())
 }

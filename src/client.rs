@@ -1179,7 +1179,6 @@ impl ClientClipboardHandler {
 }
 
 /// Audio handler for the [`Client`].
-#[derive(Default)]
 pub struct AudioHandler {
     audio_decoder: Option<(AudioDecoder, Vec<f32>)>,
     #[cfg(target_os = "linux")]
@@ -1194,6 +1193,32 @@ pub struct AudioHandler {
     device_channel: u16,
     #[cfg(not(target_os = "linux"))]
     ready: Arc<std::sync::Mutex<bool>>,
+    /// Shared recorder for writing audio frames to the recording file (fork feature).
+    recorder: Arc<Mutex<Option<Recorder>>>,
+    /// PTS counter for audio frames written to recorder.
+    audio_pts: i64,
+}
+
+impl Default for AudioHandler {
+    fn default() -> Self {
+        Self {
+            audio_decoder: None,
+            #[cfg(target_os = "linux")]
+            simple: None,
+            #[cfg(not(target_os = "linux"))]
+            audio_buffer: AudioBuffer::default(),
+            sample_rate: (0, 0),
+            #[cfg(not(target_os = "linux"))]
+            audio_stream: None,
+            channels: 0,
+            #[cfg(not(target_os = "linux"))]
+            device_channel: 0,
+            #[cfg(not(target_os = "linux"))]
+            ready: Arc::new(std::sync::Mutex::new(false)),
+            recorder: Default::default(),
+            audio_pts: 0,
+        }
+    }
 }
 
 #[cfg(not(target_os = "linux"))]
@@ -1399,6 +1424,11 @@ impl AudioHandler {
         Ok(())
     }
 
+    /// Set the shared recorder for audio recording (fork feature).
+    pub fn set_recorder(&mut self, recorder: Arc<Mutex<Option<Recorder>>>) {
+        self.recorder = recorder;
+    }
+
     /// Handle audio format and create an audio decoder.
     pub fn handle_format(&mut self, f: AudioFormat) {
         match AudioDecoder::new(f.sample_rate, if f.channels > 1 { Stereo } else { Mono }) {
@@ -1417,6 +1447,11 @@ impl AudioHandler {
     /// Handle audio frame and play it.
     #[inline]
     pub fn handle_frame(&mut self, frame: AudioFrame) {
+        // Write raw Opus frame to recorder if active (fork feature: audio recording).
+        if let Some(rec) = self.recorder.lock().unwrap().as_mut() {
+            rec.write_audio(&frame.data, self.audio_pts).ok();
+            self.audio_pts += 20; // Opus frame is typically 20ms
+        }
         #[cfg(not(target_os = "linux"))]
         if self.audio_stream.is_none() || !self.ready.lock().unwrap().clone() {
             return;
@@ -2414,6 +2449,9 @@ impl LoginConfigHandler {
     /// * `bitrate` - The given bitrate.
     /// * `quantizer` - The given quantizer.
     pub fn save_custom_image_quality(&mut self, image_quality: i32) -> Message {
+        if crate::ui_interface::is_option_fixed(keys::OPTION_IMAGE_QUALITY) {
+            return Message::new();
+        }
         let mut misc = Misc::new();
         misc.set_option(OptionMessage {
             custom_image_quality: image_quality << 8,
@@ -2434,6 +2472,9 @@ impl LoginConfigHandler {
     ///
     /// * `value` - The image quality.
     pub fn save_image_quality(&mut self, value: String) -> Option<Message> {
+        if crate::ui_interface::is_option_fixed(keys::OPTION_IMAGE_QUALITY) {
+            return None;
+        }
         let mut res = None;
         if let Some(q) = self.get_image_quality_enum(&value, false) {
             let mut misc = Misc::new();
@@ -2843,6 +2884,8 @@ pub enum MediaData {
     AudioFormat(AudioFormat),
     Reset,
     RecordScreen(bool),
+    /// Set the shared recorder for audio recording (fork feature).
+    SetRecorder(Arc<Mutex<Option<Recorder>>>),
 }
 
 pub type MediaSender = mpsc::Sender<MediaData>;
@@ -2860,6 +2903,7 @@ pub fn start_video_thread<F, T>(
     fps: Arc<RwLock<Option<usize>>>,
     chroma: Arc<RwLock<Option<Chroma>>>,
     discard_queue: Arc<RwLock<bool>>,
+    audio_sender: Option<MediaSender>,
     video_callback: F,
 ) where
     F: 'static + FnMut(usize, &mut scrap::ImageRgb, *mut c_void, bool) + Send,
@@ -2992,6 +3036,12 @@ pub fn start_video_thread<F, T>(
                         let id = session.lc.read().unwrap().id.clone();
                         if let Some(handler) = video_handler.as_mut() {
                             handler.record_screen(start, id, display, is_view_camera);
+                            // Share recorder with audio thread for audio recording (fork feature).
+                            if start {
+                                if let Some(sender) = &audio_sender {
+                                    sender.send(MediaData::SetRecorder(handler.recorder.clone())).ok();
+                                }
+                            }
                         }
                     }
                     _ => {}
@@ -3019,6 +3069,9 @@ pub fn start_audio_thread() -> MediaSender {
                     MediaData::AudioFormat(f) => {
                         log::debug!("recved audio format, sample rate={}", f.sample_rate);
                         audio_handler.handle_format(f);
+                    }
+                    MediaData::SetRecorder(recorder) => {
+                        audio_handler.set_recorder(recorder);
                     }
                     _ => {}
                 }

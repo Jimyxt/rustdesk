@@ -222,6 +222,7 @@ class _DesktopHomePageState extends State<DesktopHomePage>
                                   ?.color
                                   ?.withOpacity(0.5)),
                         ).marginOnly(top: 5),
+                        buildStandaloneRecordButton(context),
                         buildPopupMenu(context)
                       ],
                     ),
@@ -272,6 +273,56 @@ class _DesktopHomePageState extends State<DesktopHomePage>
               Icons.more_vert_outlined,
               size: 20,
               color: hover.value ? textColor : textColor?.withOpacity(0.5),
+            ),
+          ),
+        ),
+      ),
+      onHover: (value) => hover.value = value,
+    );
+  }
+
+  Widget buildStandaloneRecordButton(BuildContext context) {
+    final textColor = Theme.of(context).textTheme.titleLarge?.color;
+    RxBool hover = false.obs;
+    RxBool recording = false.obs;
+    // Check initial recording state
+    try {
+      recording.value = bind.mainIsStandaloneRecording();
+    } catch (_) {}
+    return InkWell(
+      onTap: () async {
+        try {
+          if (recording.value) {
+            await bind.mainStopRecording();
+            recording.value = false;
+            showToast(translate('Recording stopped'));
+          } else {
+            final ok = await bind.mainStartRecording();
+            if (ok) {
+              recording.value = true;
+              showToast(translate('Recording started'));
+            }
+          }
+        } catch (e) {
+          log.debug('Standalone record error: $e');
+        }
+      },
+      child: Tooltip(
+        message: recording.value
+            ? translate('Stop screen recording')
+            : translate('Start screen recording'),
+        child: Obx(
+          () => CircleAvatar(
+            radius: 15,
+            backgroundColor: hover.value
+                ? Theme.of(context).scaffoldBackgroundColor
+                : Theme.of(context).colorScheme.background,
+            child: Icon(
+              recording.value ? Icons.stop : Icons.fiber_manual_record,
+              size: 20,
+              color: recording.value
+                  ? Colors.red
+                  : (hover.value ? textColor : textColor?.withOpacity(0.5)),
             ),
           ),
         ),

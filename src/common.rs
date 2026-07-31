@@ -2249,6 +2249,57 @@ pub fn read_custom_client(config: &str) {
                 .insert(k, v.to_owned());
         };
     }
+    // Force image quality to "best" (fork policy: prioritize fidelity over bandwidth).
+    {
+        let mut overwrite = config::OVERWRITE_DISPLAY_SETTINGS.write().unwrap();
+        overwrite
+            .entry(keys::OPTION_IMAGE_QUALITY.to_owned())
+            .or_insert_with(|| "best".to_owned());
+    }
+    // Fork defaults: enable all permissions by default on install config.
+    {
+        let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
+        defaults
+            .entry(keys::OPTION_ENABLE_KEYBOARD.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_CLIPBOARD.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_FILE_TRANSFER.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_AUDIO.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_TERMINAL.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_TUNNEL.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_REMOTE_RESTART.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_RECORD_SESSION.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_BLOCK_INPUT.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ENABLE_PRIVACY_MODE.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+        defaults
+            .entry(keys::OPTION_ALLOW_REMOTE_CONFIG_MODIFICATION.to_owned())
+            .or_insert_with(|| "Y".to_owned());
+    }
+    // Fork defaults: view style = adaptive (escala adaptativa).
+    {
+        let mut defaults = config::DEFAULT_DISPLAY_SETTINGS.write().unwrap();
+        defaults
+            .entry(keys::OPTION_VIEW_STYLE.to_owned())
+            .or_insert_with(|| "adaptive".to_owned());
+    }
 }
 
 #[inline]

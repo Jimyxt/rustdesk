@@ -719,6 +719,12 @@ class ServerModel with ChangeNotifier {
         final index = _clients.indexWhere((client) => client.id == id);
         if (index >= 0) {
           if (close) {
+            try {
+              final client = _clients[index];
+              _persistServerChat(client);
+            } catch (e) {
+              debugPrint('chat backup failed onClientRemove: $e');
+            }
             _clients.removeAt(index);
             tabController.remove(index);
           } else {
@@ -738,7 +744,37 @@ class ServerModel with ChangeNotifier {
     }
   }
 
+  bool _isActiveClient(int connId) {
+    try {
+      return tabController.state.value.selectedTabInfo.key == connId.toString();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<void> _persistServerChat(Client client) async {
+    final key = MessageKey(client.peerId, client.id);
+    final content = parent.target?.chatModel.serializeChat(key) ?? '';
+    if (content.isEmpty) return;
+    final backupPath = await bind.saveChatBackup(
+        peerId: client.peerId, connId: client.id, content: content);
+    if (backupPath.isEmpty) {
+      debugPrint('AppData chat backup failed (peer ${client.peerId})');
+    }
+    if (_isActiveClient(client.id)) {
+      await parent.target?.chatModel.offerSaveAs(
+          peerId: client.peerId, connId: client.id, content: content);
+    }
+  }
+
   Future<void> closeAll() async {
+    for (final client in _clients.toList()) {
+      try {
+        await _persistServerChat(client);
+      } catch (e) {
+        debugPrint('closeAll chat backup failed for ${client.peerId}: $e');
+      }
+    }
     await Future.wait(
         _clients.map((client) => bind.cmCloseConnection(connId: client.id)));
     _clients.clear();

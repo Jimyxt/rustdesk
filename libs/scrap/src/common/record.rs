@@ -16,7 +16,7 @@ use std::{
     sync::mpsc::Sender,
     time::Instant,
 };
-use webm::mux::{self, Segment, Track, VideoTrack, Writer};
+use webm::mux::{self, AudioCodecId, AudioTrack, Segment, Track, VideoTrack, Writer};
 
 const MIN_SECS: u64 = 1;
 
@@ -77,6 +77,9 @@ pub trait RecorderApi {
     where
         Self: Sized;
     fn write_video(&mut self, frame: &EncodedVideoFrame) -> bool;
+    fn write_audio(&mut self, _data: &[u8], _pts: i64) -> bool {
+        false
+    }
 }
 
 #[derive(Debug)]
@@ -268,10 +271,15 @@ impl Recorder {
     fn send_state(&self, state: RecordState) {
         self.ctx.tx.as_ref().map(|tx| tx.send(state));
     }
+
+    pub fn write_audio(&mut self, data: &[u8], pts: i64) -> bool {
+        self.inner.as_mut().map(|x| x.write_audio(data, pts)).unwrap_or(false)
+    }
 }
 
 struct WebmRecorder {
     vt: VideoTrack,
+    audio_track: Option<AudioTrack>,
     webm: Option<Segment<Writer<File>>>,
     ctx: RecorderContext,
     ctx2: RecorderContext2,
@@ -308,6 +316,7 @@ impl RecorderApi for WebmRecorder {
                 mux::VideoCodecId::AV1
             },
         );
+        let audio_track = webm.add_audio_track(48000, 2, None, AudioCodecId::Opus);
         if ctx2.format == CodecFormat::AV1 {
             // [129, 8, 12, 0] in 3.6.0, but zero works
             let codec_private = vec![0, 0, 0, 0];
@@ -317,6 +326,7 @@ impl RecorderApi for WebmRecorder {
         }
         Ok(WebmRecorder {
             vt,
+            audio_track: Some(audio_track),
             webm: Some(webm),
             ctx,
             ctx2,
@@ -338,6 +348,14 @@ impl RecorderApi for WebmRecorder {
                 self.written = true;
             }
             ok
+        } else {
+            false
+        }
+    }
+
+    fn write_audio(&mut self, data: &[u8], pts: i64) -> bool {
+        if let Some(track) = self.audio_track.as_mut() {
+            track.add_frame(data, pts as u64 * 1_000_000, true)
         } else {
             false
         }
