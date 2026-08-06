@@ -439,6 +439,16 @@ impl RecorderApi for HwRecorder {
             false
         }
     }
+
+    // Opus passthrough into the MP4 audio track added by the patched hwcodec
+    // muxer. PTS is supplied to the muxer, which stamps it on the container
+    // timeline (see `Muxer::write_audio`).
+    fn write_audio(&mut self, data: &[u8], pts: i64) -> bool {
+        self.muxer
+            .as_mut()
+            .map(|m| m.write_audio(data, pts).is_ok())
+            .unwrap_or(false)
+    }
 }
 
 #[cfg(feature = "hwcodec")]

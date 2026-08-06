@@ -2463,6 +2463,20 @@ impl<T: InvokeUiSession> Remote<T> {
         if self.video_threads.len() == 1 {
             let auto_record =
                 LocalConfig::get_bool_option(config::keys::OPTION_ALLOW_AUTO_RECORD_OUTGOING);
+            // Guard: if a standalone recording is already running (started
+            // before this remote connection), do NOT auto-start a session
+            // recording — it would conflict with the in-progress standalone
+            // capture. The user can still start a session recording manually
+            // after stopping the standalone one.
+            let auto_record =
+                if auto_record && crate::standalone_recorder::is_standalone_recording() {
+                    log::info!(
+                        "auto-record on connection skipped: standalone recording in progress"
+                    );
+                    false
+                } else {
+                    auto_record
+                };
             self.handler.lc.write().unwrap().record_state = auto_record;
             self.update_record_state();
         }

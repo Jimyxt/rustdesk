@@ -209,6 +209,12 @@ exclude = ["vdi/host", "examples/custom_plugin"]
 [patch.crates-io]
 libxdo-sys = { path = "libs/libxdo-sys-stub" }
 
+# Patch hwcodec to a vendored fork (libs/hwcodec) that adds an Opus audio track
+# to the MP4 muxer, so H264/H265 session recordings include audio (Opus 48 kHz
+# stereo passthrough) instead of being video-only.
+[patch."https://github.com/rustdesk-org/hwcodec"]
+hwcodec = { path = "libs/hwcodec" }
+
 [package.metadata.winres]
 LegalCopyright = "Copyright © 2026 Purslane Tech Pte. Ltd. All rights reserved."
 ProductName = "RustDesk"

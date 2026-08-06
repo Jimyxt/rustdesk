@@ -1,11 +1,12 @@
 # RustDesk Fork v2 — Build & Install Guide for Windows
 
-This fork adds 5 features on top of upstream RustDesk:
+This fork adds 6 features on top of upstream RustDesk:
 1. **Chat persistence** — auto-backup chat + save-as on connection close
 2. **Image quality lock** — forces `image_quality = "best"` always
 3. **Config defaults** — all permissions enabled by default + adaptive view style
-4. **Standalone recording** — record screen without a remote connection
-5. **Audio recording** — Opus audio track in `.webm` recordings
+4. **Standalone recording** — record screen (video + local system audio) without a remote connection
+5. **Audio recording** — Opus audio track in **all** recordings: `.webm` (VP8/VP9/AV1 via WebmRecorder) and `.mp4` (H264/H265 via the patched hwcodec muxer)
+6. **Auto-record on connection** — `allow-auto-record-outgoing` defaults **on**, so an outgoing session starts recording (video + audio) automatically. A guard in `io_loop.rs` skips the auto-start when a standalone recording is already running, avoiding a conflict with the in-progress capture. Users can still toggle it off in Settings.
 
 **Source:** https://github.com/Jimyxt/rustdesk (fork of `rustdesk/rustdesk`)
 
@@ -50,6 +51,8 @@ git submodule update --init --recursive
 > ```powershell
 > git submodule update --init --recursive
 > ```
+
+> ℹ️ This fork vendors a **patched copy of `hwcodec`** under `libs/hwcodec/` (redirected via a `[patch]` in the workspace `Cargo.toml`). The patch adds an **Opus audio track** to the MP4 muxer (`cpp/mux/mux.cpp`) so H264/H265 session recordings include audio instead of being video-only. The upstream git dependency is not used at build time. No action needed — `cargo build` picks up the local fork automatically.
 
 ---
 
@@ -255,15 +258,19 @@ reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v RustDesk /t REG_
 2. Click it — the icon should turn **red** (recording active)
 3. Wait a few seconds, click again to **stop**
 4. Check your Videos folder (`%USERPROFILE%\Videos\`) — a `.webm` file should appear
-5. Play the file — it should show your screen recording
+5. Play the file — it should show your screen recording **with audio** (local system audio captured via WASAPI loopback on Windows, ScreenCaptureKit on macOS, PulseAudio monitor on Linux) as an Opus track
+6. Verify with `ffprobe <file>.webm` — it should list both `Video: vp9` and `Audio: opus, 48000 Hz, stereo` with a non-zero packet count
 
-### Feature 3 — Audio Recording
+### Feature 3 — Audio Recording (remote sessions)
 1. Connect to a remote peer (or have someone connect to you)
 2. Start a session recording (the existing record button in the remote toolbar)
 3. Exchange some audio (talk on both ends)
 4. End the session — check the recording file
-5. Play the `.webm` file — it should have **audio from the remote peer**
-6. ⚠️ **Limitation:** Audio only works with VP9/VP8/AV1 encoders. If the connection uses H264/H265 (hwcodec), the recording will have **video only, no audio**
+5. Play the recording — it should have **audio from the remote peer** (what you hear through the connection)
+6. Audio works for **all** codecs: VP8/VP9/AV1 produce a `.webm` with an Opus track (WebmRecorder); H264/H265 (hwcodec) produce a `.mp4` with an Opus track (patched hwcodec muxer). Verify with:
+   - `ffprobe <file>.webm` → `Audio: opus, 48000 Hz, stereo`
+   - `ffprobe <file>.mp4` → `Audio: opus, 48000 Hz, stereo`
+7. ⚠️ **Scope:** Session recordings capture the **remote peer's audio** (what you hear). Local system audio on the recording side is captured by the standalone recorder (Feature 2), not the session recorder.
 
 ### Feature 4 — Chat Persistence
 1. Connect to a peer, open chat, exchange messages
@@ -275,6 +282,12 @@ reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v RustDesk /t REG_
 1. Open Settings → Image Quality
 2. Radio buttons (Best / Balanced / Low / Custom) should be **disabled/greyed out**
 3. In-session toolbar quality menu is visually editable but clicking "Low" does nothing (Rust-side guard no-ops)
+
+### Feature 6 — Auto-record on connection
+1. With **no** standalone recording running, connect to a remote peer
+2. The session should start recording automatically (record indicator active); a recording file (`.webm` for VP8/VP9/AV1, `.mp4` for H264/H265) appears with both video and audio
+3. **Conflict guard:** start a standalone recording first (Feature 4), then connect to a remote peer — the auto-record should be **skipped** (log: `auto-record on connection skipped: standalone recording in progress`), and only the standalone recording continues. Stop the standalone recording and reconnect to confirm auto-record resumes.
+4. To opt out: Settings → Recording → uncheck "Automatically record outgoing sessions" (sets `allow-auto-record-outgoing` = `N`)
 
 ---
 
@@ -289,7 +302,8 @@ reg add "HKCU\Software\Microsoft\Windows\CurrentVersion\Run" /v RustDesk /t REG_
 | `dylib_virtual_display.dll` not found | Build it separately: `cd libs\virtual_display\dylib && cargo build --release`. Copy to the same folder as `rustdesk.exe`. |
 | `cargo build` — `chrono` not found | Build from repo root (not `flutter/`): `cargo build --locked --features flutter --lib --release` |
 | Settings toggles not defaulted | Defaults apply after `read_custom_client()` runs at init — restart the app. |
-| Recording has no audio | Check the encoder: if H264/H265 (hwcodec), audio is not supported. Force VP8/VP9 in settings or use `--hwcodec` off. |
+| Recording has no audio | Verify with `ffprobe <file>` that no audio stream is present, then check the codec: VP8/VP9/AV1 use WebmRecorder; H264/H265 use the patched hwcodec MP4 muxer. If the `.mp4` lacks audio, confirm the build used the vendored `libs/hwcodec` fork (the `[patch]` in `Cargo.toml` must not be removed). On Windows the Opus-in-MP4 path requires a recent FFmpeg via vcpkg. |
+| Standalone recording has no audio | The standalone recorder captures local system audio (WASAPI loopback) via `src/standalone_audio.rs`. If absent, check that the default audio output device is reachable and not muted; on Linux ensure a PulseAudio monitor source exists. |
 | Build is slow (>30 min) | Normal for first build. Rust compiles ~300 crates. Subsequent builds use caching and are faster. |
 | Portable packer fails | Use `--skip-portable-pack` flag: `python build.py --flutter --hwcodec --skip-portable-pack`. Use Option B or C for installation. |
 

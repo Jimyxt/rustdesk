@@ -1,16 +1,19 @@
 use std::sync::{Arc, Mutex};
 use std::thread;
 
-use hbb_common::{log, ResultType};
+use hbb_common::{log, message_proto::Message, ResultType};
 use scrap::codec::{Encoder, EncoderCfg, EncoderApi};
-use scrap::codec::record::{Recorder, RecorderContext};
+use scrap::record::{Recorder, RecorderContext};
 use scrap::vpxcodec::{VpxEncoderConfig, VpxVideoCodecId};
-use scrap::{Capturer, Display, TraitCapturer, STRIDE_ALIGN};
+use scrap::{Capturer, Display, TraitCapturer};
 
 use crate::ui_interface::video_save_directory;
 
 /// Standalone screen recorder that works without a remote connection.
 /// Captures the local screen, encodes with VP9, and writes to a .webm file.
+/// Also captures local system audio (loopback) and writes an Opus track to the
+/// same .webm via the shared `Recorder`. Audio capture runs in a sibling thread
+/// managed by `crate::standalone_audio`; see that module for platform coverage.
 pub struct StandaloneRecorder {
     recording: Arc<Mutex<bool>>,
     thread_handle: Option<thread::JoinHandle<()>>,
@@ -67,7 +70,7 @@ fn run_recording_loop(recording: Arc<Mutex<bool>>) -> ResultType<()> {
     );
 
     // Create capturer
-    let mut capturer = Capturer::new(d).with_context(|| "Failed to create capturer")?;
+    let mut capturer = Capturer::new(d)?;
 
     // Create VP9 encoder
     let encoder_cfg = EncoderCfg::VPX(VpxEncoderConfig {
@@ -77,7 +80,12 @@ fn run_recording_loop(recording: Arc<Mutex<bool>>) -> ResultType<()> {
         codec: VpxVideoCodecId::VP9,
         keyframe_interval: Some(240),
     });
-    let mut encoder = Encoder::new(encoder_cfg);
+    let mut encoder = Encoder::new(encoder_cfg, false)?;
+
+    // Allocate YUV conversion buffers
+    let yuvfmt = encoder.yuvfmt();
+    let mut yuv_buf: Vec<u8> = Vec::new();
+    let mut mid_data: Vec<u8> = Vec::new();
 
     // Create recorder (file writer)
     let save_dir = video_save_directory(false);
@@ -91,6 +99,10 @@ fn run_recording_loop(recording: Arc<Mutex<bool>>) -> ResultType<()> {
     })?;
     let recorder = Arc::new(Mutex::new(Some(recorder)));
 
+    // Start audio capture in a sibling thread sharing the same recorder.
+    let audio_handle =
+        crate::standalone_audio::start_audio_capture(recorder.clone(), recording.clone());
+
     // Capture + encode + record loop
     let mut ms = 0i64;
     let frame_interval = std::time::Duration::from_millis(33); // ~30fps
@@ -98,29 +110,27 @@ fn run_recording_loop(recording: Arc<Mutex<bool>>) -> ResultType<()> {
     while *recording.lock().unwrap() {
         let start = std::time::Instant::now();
 
-        // Capture frame
-        match capturer.frame() {
+        // Capture frame (pass the frame interval as the timeout)
+        match capturer.frame(frame_interval) {
             Ok(frame) => {
-                let yuv = scrap::common::convert::ARGBToYUV(
-                    &frame,
-                    width,
-                    height,
-                    STRIDE_ALIGN,
-                );
-                if let Ok(encoded) = encoder.encode(&yuv, ms) {
-                    for frame in encoded {
-                        let mut msg = hbb_common::message_proto::Message::new();
-                        let mut vf = hbb_common::message_proto::VideoFrame::new();
-                        let mut vp9s = hbb_common::message_proto::Vpxs::new();
-                        let mut vpx_frame = hbb_common::message_proto::EncodedVideoFrame::new();
-                        vpx_frame.data = frame.data.into();
-                        vpx_frame.key = frame.key;
-                        vpx_frame.pts = frame.pts;
-                        vp9s.frames.push(vpx_frame);
-                        vf.set_vp9s(vp9s);
-                        msg.set_video_frame(vf);
-                        if let Some(r) = recorder.lock().unwrap().as_mut() {
-                            r.write_message(&msg, width, height);
+                if frame.valid() {
+                    match frame.to(yuvfmt.clone(), &mut yuv_buf, &mut mid_data) {
+                        Ok(input) => {
+                            match encoder.encode_to_message(input, ms) {
+                                Ok(vf) => {
+                                    let mut msg = Message::new();
+                                    msg.set_video_frame(vf);
+                                    if let Some(r) = recorder.lock().unwrap().as_mut() {
+                                        r.write_message(&msg, width, height);
+                                    }
+                                }
+                                Err(e) => {
+                                    log::error!("Encode error: {e:?}");
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            log::error!("YUV conversion error: {e:?}");
                         }
                     }
                 }
@@ -142,6 +152,11 @@ fn run_recording_loop(recording: Arc<Mutex<bool>>) -> ResultType<()> {
         }
     }
 
+    // Stop audio capture first (sets recording=false above already signals it),
+    // then drop the recorder so the WebmRecorder finalizes the .webm with the
+    // audio track flushed.
+    let _ = audio_handle.join();
+    drop(recorder);
     log::info!("Standalone recording stopped");
     Ok(())
 }

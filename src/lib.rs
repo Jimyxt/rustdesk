@@ -73,5 +73,6 @@ pub mod privacy_mode;
 #[cfg(windows)]
 pub mod virtual_display_manager;
 pub mod standalone_recorder;
+mod standalone_audio;
 
 mod kcp_stream;

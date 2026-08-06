@@ -1453,8 +1453,9 @@ impl AudioHandler {
     pub fn handle_frame(&mut self, frame: AudioFrame) {
         // Write raw Opus frame to recorder if active (fork feature: audio recording).
         if let Some(rec) = self.recorder.lock().unwrap().as_mut() {
-            rec.write_audio(&frame.data, self.audio_pts).ok();
-            self.audio_pts += 20; // Opus frame is typically 20ms
+            let _ = rec.write_audio(&frame.data, self.audio_pts);
+            // 10 ms per Opus frame (audio_service.rs: frame_size = sample_rate / 100)
+            self.audio_pts += 10;
         }
         #[cfg(not(target_os = "linux"))]
         if self.audio_stream.is_none() || !self.ready.lock().unwrap().clone() {
